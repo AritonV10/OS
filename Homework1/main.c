@@ -122,7 +122,7 @@ int main(int argc, char ** args) {
             avg_grades_students(studs, &sfd->nstuds);
         } else {
             qsort(studs, sfd->nstuds, sizeof(student_t *), &_cmp_fnc);
-            avg_grades_students(studs, &sfd->nstuds);
+           // avg_grades_students(studs, &sfd->nstuds);
         }
 
     } else {
@@ -189,9 +189,10 @@ get_students(const stud_file_t * sfd) {
         /* read one line into the buffer */
         read(sfd->fd, linebuf, sfd->szlines[i]);
 
+        for(ch = 0; linebuf[ch - 2] != ':'; ++ch) {};
 
         /* get the length of the name of the student */
-        for(ch = LINE_OFFSET, name_len = 0; linebuf[ch] != COMMA; ++ch, ++name_len) {}
+        for(name_len = 0; linebuf[ch] != COMMA; ++ch, ++name_len) {}
 
         if(!(student_name = malloc(sizeof(char) * (name_len + 1))))
             ERR(-1, "Could not allocate memory for the student name")
@@ -199,7 +200,7 @@ get_students(const stud_file_t * sfd) {
         head = student_name;
 
         /* copy the name of the student into the memory chunk */
-        for(ch = LINE_OFFSET; linebuf[ch] != COMMA; ++ch, ++head) {
+        for(ch = (ch - name_len); linebuf[ch] != COMMA; ++ch, ++head) {
             *head = linebuf[ch];
         }
 
@@ -247,7 +248,7 @@ get_students(const stud_file_t * sfd) {
 
     }
 
-    return students;
+    return(students);
 
 }
 
