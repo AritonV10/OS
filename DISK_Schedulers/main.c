@@ -5,6 +5,14 @@
 
 #define _LITTLE_INDIAN_
 
+/* used for testing individual functions */
+/*
+#if defined(_TEST_)
+    #define 
+#else
+    
+#endif
+*/
 
 #define NARGUMENTS  (0x05)
 
@@ -35,7 +43,7 @@
 
 #define NTHREADS    (0x4)
 
-#define FIFO_THREAD (0x01) 
+#define FCFS_THREAD (0x01) 
 
 #define SCAN_THREAD (0x02)
 
@@ -44,13 +52,16 @@
 #define _THREAD2    (0x04)
 
 
+#define CHAR_TO_DIGIT(c) ((c) & 0x0F)
+    
+
 #define IS_DONE(c)            (c == 0x10101010)
 #define IS_READY_NEXT_LINE(c) (c == 0x01010101)
     
-    
+
 
 #define SINT_MAX              (1u << sizeof(int32_t) - 1)
-
+#define UDOUBLE_EXPONENT_MAX  (1u << sizeof(double) - 1)
 
 /******************** TYPE DEFINITIONS **********************************/
 
@@ -65,7 +76,7 @@ typedef uint32_t disk_section;
    finished the line:       0x01010101
    finished all the lines:  0x10101010
    
-   FIFO_THREAD -> signal_A
+   FCFS_THREAD -> signal_A
    SCAN_THREAD -> signal_B
    _THREAD     -> signal_C
    _THREAD2    -> signal_D
@@ -121,16 +132,26 @@ void
 die(const char *, const char *, const char *, ...) NORET;
 
 uint32_t
-stoi(const char * __restrict);
+u32_stoi(const char * __restrict);
 
 double
-FIFO(const disk_section *, const uint32_t *);
+ud_stoi(const char *__restrict);
 
+double
+FCFS(const disk_section *, const size_t *);
+
+
+double
+SCAN(const disk_section *, const size_t *);
+
+double
+CSCAN(const disk_section *, const uint32_t *);
 
 /************************************************************************/
 /************************************************************************/
 
 /* volatile in case it gets cached since it fits into the cache */
+/* if its spread among multiple cores */
 volatile semaphore_t semaphores = {(0x00000000)};
 
 /* wait for all the threads to finish before continuing */
@@ -152,7 +173,8 @@ static uint8_t direction_g;
 static uint32_t nlines_g;
 
 
-const char   [][]threads = { "FIFO_THREAD", "SCAN_THREAD", "_THREAD", "_THREAD2", "C-STAN_THREAd" };
+/* const char   [][]threads = { "FCFS_THREAD", "SCAN_THREAD", "_THREAD", "_THREAD2", "C-STAN_THREAd" }; */
+
 disk_section **sections_g;
 double       **algo_time_g;
 
@@ -173,32 +195,41 @@ int main(int argc, char **argv) {
     
     #if defined(__DEBUG__)
         
-        disk_section test_sections[] = {12, 6, 20, 30, 100, 150, 9};
+        disk_section test_sections[] = {98, 183, 41, 122, 14, 124, 65, 67};
         size_t size                  = sizeof(test_sections)/sizeof(*test_sections);         
         
-        rotation_time_g              = (double) .2;
+        rotation_time_g              = (double) .1;
         
         access_time_g                = (double) .2;
     
         seek_time_g                  = (double) .1;
     
-        start_sector_g               = 15;
+        start_sector_g               = 53;
     
     #endif
     
     /* open file -> get # lines -> alloc the disk sections -> SEEK_START the cursor -> get # of integers -> alloc the arrays
        -> start the threads -> check the bitmap -> realloc the array for the new numbers */
     
-    /* printf("%f\n", FIFO(test_sections, &size)); */
+    /* printf("%f\n", FCFS(test_sections, &size)); */
     
-    printf("%f\n", FIFO(test_sections, &size));
+    printf("%f\n", FCFS(test_sections, &size));
     
+    printf("%d\n", u32_stoi("-123"));
+    
+    
+    printf("%f\n", ud_stoi(".42"));
+    
+    printf("%d", UDOUBLE_EXPONENT_MAX);
     
     /* busy wait until all the threads are done */
+    /*
     while(!IS_DONE(latch))
         ;
-        
+    
+    */
     /* find the smallest time for each algorithm */
+    /*
     for(index = 0; index < nlines_g; ++index) {
         
         double *times = algo_time_g[index];
@@ -207,7 +238,7 @@ int main(int argc, char **argv) {
         printf("Dataset %d =\nTime: %d\nBy: %s", (i + 1), algoIndex[index][min], threads[index]);
         
     }
-    
+    */
     return 0;
 }
 
@@ -229,6 +260,7 @@ absolute_value(const int32_t value) {
 void
 die(const char *type, const char *fmt, const char *arg, ...) {
     LOG("Info", "%s %d", arg);
+    exit(1);
 }
 
 /* scans either the left or right sections first */
@@ -241,72 +273,123 @@ SCAN(const disk_section *sections, const size_t *size) {
     uint32_t current_position;
     /* TODO: check for underflow */
     
-    time_mili = absolute_value(start_sector_g - sections_g[0]) * seek_time_g + access_time_g;
+    time_mili = absolute_value(start_sector_g - sections[0]) * seek_time_g + access_time_g;
     
 }
 
 double
-FIFO(const disk_section *sections, const size_t *size) {
+FCFS(const disk_section *sections, const size_t *size) {
     
     double time_mili;
     
     int32_t index;
     uint32_t current_position;
+    int32_t  sum;
     /* TODO: check for underflow */
     
-    time_mili = absolute_value(start_sector_g - sections_g[0]) * seek_time_g + access_time_g;
     
-    current_position = sections_g[0];
+    time_mili = absolute_value(start_sector_g - sections[0]) * seek_time_g + access_time_g;
     
-    
+    current_position = sections[0];
+    sum = absolute_value(start_sector_g - sections[0]);
+    // 1 2 3
     
     for(index = 1; index < *size; ++index) {
-        time_mili = time_mili + absolute_value(current_position - sections_g[index]) * seek_time_g + access_time_g + (sections_g[index + 1] > sections_g[index] ? 0 : rotation_time_g);   
-        current_position = sections_g[index];
+        time_mili = time_mili + absolute_value(current_position - sections[index]) * seek_time_g + access_time_g + (sections[index + 1] > sections[index] ? 0 : rotation_time_g);   
+        sum += absolute_value(current_position - sections[index]);
+        current_position = sections[index];
+        
     }
+    
+    printf("%d\n", sum);
     
     return(time_mili);
     
     
 }
 
-uint32_t
-stoi(const char * __restrict number) {
+
+double
+ud_stoi(const char *__restrict number) {
     
-    #define CHAR_TO_DIGIT(c) ((c) & 0x0F)
+    double   buf;
+    
+    double   mantisa;
+    
+    uint32_t ten;
+    
+    ten = 0x0000000A;
+    buf = 0.0;
+    
+    if(*number == 0x2D)
+        return 0.0;
+    
+    
+    /* TODO: check for overflow */
+    
+    for(; *number != '.'; ++number)
+        buf = (buf * 10) + CHAR_TO_DIGIT(*number);
+    
+    /* move it beyond the decimal point */
+    ++number;
+    
+    /* 43.132 */
+    /* inefficient way */
+    for(; *number != NULL; ++number) {
+        
+        mantisa = (float)(CHAR_TO_DIGIT(*number))/ten;
+        
+        ten *= 0x0000000A;
+        
+        buf += mantisa;
+    }
+    
+    return(buf);
+    
+}
+
+uint32_t
+u32_stoi(const char * __restrict number) {
     
     uint32_t buf;
     
     buf = 0;
     
+    if(*number == 0x2D)
+        return(0);
+        
     for(; *number != 0; ++number) {
-        if(((buf * 10) + CHAR_TO_DIGIT(*number)) <= SINT_MAX) 
+        
+        /* check the first bit since it'd be a negative value if it overflows */
+        if((((buf * 10) + CHAR_TO_DIGIT(*number)) & 0x80000000) == 0) 
             buf = (buf * 10) + CHAR_TO_DIGIT(*number);
-            
+        else
+            DIE("Fatal", "Integer overflow - '%s' too big", number);
     }
         
     return(buf);
 }
 
-void FIFO_thread_start(void *vptr) {
+void FCFS_thread_start(void *vptr) {
     
     
     int32_t *sections;
     
     uint32_t index;
-    uint32_t algoindex;
+    uint32_t algo_index;
+    
     size_t   size;
     
     
     double   time_mili;
     
-    for(index = 0, algoindex = 0; index < nlines; ++index) {
+    for(index = 0, algo_index = 0; index < nlines_g; ++index) {
         
-        sections  = disk_section[index];
+        sections  = sections_g[index];
         size      = sizeof(sections)/sizeof(*sections);
-        time_mili = FIFO(sections, &size);
+        time_mili = FCFS(sections, &size);
     
-        algo_time[algoIndex++][FIFO_THREAD] = time_mili; 
+        algo_time_g[algo_index++][FCFS_THREAD] = time_mili; 
         
         
         /* signal that it has finished the line */
@@ -335,13 +418,14 @@ find_min_time(const double *array) {
     min = (999.0);
     
     for(index = 0; index < NTHREADS; ++index) {
-        if(array[i] < min) {
-            min_index = i;
-            min       = array[i];
+        if(array[index] < min) {
+            min_index = index;
+            min       = array[index];
         }
     }
     
-    return(min)
-};
+    return(min);
+}
+
 
 
