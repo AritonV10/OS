@@ -55,8 +55,8 @@
 #define CHAR_TO_DIGIT(c) ((c) & 0x0F)
     
 
-#define IS_DONE(c)            (c == 0x10101010)
-#define IS_READY_NEXT_LINE(c) (c == 0x01010101)
+#define IS_DONE(c)            (c == DONE)
+#define IS_READY_NEXT_LINE(c) (c == LINE)
     
 
 
@@ -72,17 +72,25 @@ typedef void(*algo_func)(void*);
 typedef uint32_t disk_section;
 
 
+typedef enum _task_status {
+    
+    /* if the threads are ready for the next line */
+    LINE = 0x01010101,
+    
+    /* if the threads are done computing all the lines */
+    DONE = 0x10101010
+    
+} task_status_t;
+
+
+
 /* 
-   finished the line:       0x01010101
-   finished all the lines:  0x10101010
-   
-   FCFS_THREAD -> signal_A
-   SCAN_THREAD -> signal_B
-   _THREAD     -> signal_C
-   _THREAD2    -> signal_D
-   
- */
- 
+   Mappings:
+        FCFS_THREAD -> signal_A
+        SCAN_THREAD -> signal_B
+        _THREAD     -> signal_C
+        _THREAD2    -> signal_D
+*/
 typedef union _semaphore {
     
     uint32_t signals;
