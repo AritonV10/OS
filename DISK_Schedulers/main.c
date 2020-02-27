@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <math.h>
 
 
 #define _LITTLE_INDIAN_
@@ -59,10 +60,21 @@
 #define IS_READY_NEXT_LINE(c) (c == LINE)
     
 
+#define CHAR_BIT 8
 
-#define SINT_MAX              (1u << sizeof(int32_t) - 1)
-#define UDOUBLE_EXPONENT_MAX  (1u << sizeof(double) - 1)
+#define SINT_MAX              (1u << (sizeof(int32_t) * CHAR_BIT - 1))
 
+#define UDOUBLE_EXPONENT_MAX  (1u << (sizeof(double) * CHAR_BIT - 1))
+
+
+
+#define BOILER_PLATE \
+    double time_mili; \
+    int32_t index; \
+    int32_t  head_movement; \
+    uint32_t current_position; \
+    task_details_t execution_details;
+    
 /******************** TYPE DEFINITIONS **********************************/
 
 typedef int FD;
@@ -82,7 +94,13 @@ typedef enum _task_status {
     
 } task_status_t;
 
-
+typedef struct _task_details {
+    
+    double   time_mili;
+    
+    uint32_t head_movement;
+    
+} task_details_t;
 
 /* 
    Mappings:
@@ -91,6 +109,8 @@ typedef enum _task_status {
         _THREAD     -> signal_C
         _THREAD2    -> signal_D
 */
+
+
 typedef union _semaphore {
     
     uint32_t signals;
@@ -128,7 +148,24 @@ typedef union _semaphore {
 } semaphore_t;
 
 
+typedef struct _bitset {
+    
+    uint8_t *array;
+    
+} bitset_t;
+
+
 /******************** FUNCTION DECLARATIONS *****************************/
+
+
+void *
+mmalloc(size_t);
+
+bitset_t *
+make_bitset(size_t);
+
+uint32_t
+find_closest_distance(const disk_section *, const size_t *, uint32_t);
 
 uint32_t
 find_min_time(const double *);
@@ -145,9 +182,11 @@ u32_stoi(const char * __restrict);
 double
 ud_stoi(const char *__restrict);
 
-double
+task_details_t
 FCFS(const disk_section *, const size_t *);
 
+task_details_t
+SSTF(const disk_section *, const size_t *);
 
 double
 SCAN(const disk_section *, const size_t *);
@@ -158,12 +197,12 @@ CSCAN(const disk_section *, const uint32_t *);
 /************************************************************************/
 /************************************************************************/
 
+
 /* volatile in case it gets cached since it fits into the cache */
-/* if its spread among multiple cores */
 volatile semaphore_t semaphores = {(0x00000000)};
 
 /* wait for all the threads to finish before continuing */
-int32_t volatile latch;
+volatile int32_t latch;
 
 
 /********** DISK SPEC **********/
@@ -185,9 +224,13 @@ static uint32_t nlines_g;
 
 disk_section **sections_g;
 double       **algo_time_g;
-
+uint32_t     **head_movement_g;
 
 /* 
+    Arg order:
+        1. Path
+        2. Disk data 
+        
     Arg list:
         1. Seek time
         2. Rotation time
@@ -197,9 +240,14 @@ double       **algo_time_g;
         ...
 */
 
+
 int main(int argc, char **argv) {
     
     uint32_t index;
+    
+    if(argc < 0)
+        DIE("Warning", "Invalid number of arguments - %d", argc);
+    
     
     #if defined(__DEBUG__)
         
@@ -221,14 +269,21 @@ int main(int argc, char **argv) {
     
     /* printf("%f\n", FCFS(test_sections, &size)); */
     
-    printf("%f\n", FCFS(test_sections, &size));
+    task_details_t ex = FCFS(test_sections, &size);
     
-    printf("%d\n", u32_stoi("-123"));
+   // printf("%d", test_sections[find_closest_distance(test_sections, &size, 41)]);
     
+    printf("%f\n", ceil(2.125));
     
-    printf("%f\n", ud_stoi(".42"));
+    double x = 2.25;
     
-    printf("%d", UDOUBLE_EXPONENT_MAX);
+    /* 1/(bit_position) ) [11 bits exponent][53 mantissa] => */
+    
+    printf("%d", ((int64_t) x >> (51)));
+    
+    /*double x = 2.5;*/
+    
+    /*printf("%d", (((int64_t) x) & 0x000FFFFFFFFF)); */
     
     /* busy wait until all the threads are done */
     /*
@@ -243,16 +298,20 @@ int main(int argc, char **argv) {
         double *times = algo_time_g[index];
         uint32_t min  = find_min_time(times);
         
+        
         printf("Dataset %d =\nTime: %d\nBy: %s", (i + 1), algoIndex[index][min], threads[index]);
         
     }
     */
+    
     return 0;
 }
 
 /******************** FUNCTION DEFINITIONS ******************************/
 
-/* 1100 -> 0100 -. 0011 -> 0111, -8, var & (1ul << sizeof(int32_t) - 1), ~!sign * var */
+/* 1100 -> 0100 -. 0011 -> 0111, -8, var & (1ul << sizeof(int32_t) * CHAR_BIT - 1), ~!sign * var */
+
+
 
 
 
@@ -260,7 +319,7 @@ int main(int argc, char **argv) {
 uint32_t
 absolute_value(const int32_t value) {
     
-    uint32_t mask = (value >> (sizeof(int32_t) - 1));
+    uint32_t mask = (value >> (sizeof(int32_t) * CHAR_BIT - 1));
     
     return((value + mask) ^ mask);
 }
@@ -271,6 +330,7 @@ die(const char *type, const char *fmt, const char *arg, ...) {
     exit(1);
 }
 
+
 /* scans either the left or right sections first */
 double
 SCAN(const disk_section *sections, const size_t *size) {
@@ -279,43 +339,74 @@ SCAN(const disk_section *sections, const size_t *size) {
     
     int32_t index;
     uint32_t current_position;
+
     /* TODO: check for underflow */
     
     time_mili = absolute_value(start_sector_g - sections[0]) * seek_time_g + access_time_g;
     
 }
 
-double
+task_details_t
 FCFS(const disk_section *sections, const size_t *size) {
     
     double time_mili;
     
     int32_t index;
+    
+    int32_t  head_movement;
+
     uint32_t current_position;
-    int32_t  sum;
+    
+    task_details_t execution_details;
+    
     /* TODO: check for underflow */
     
-    
-    time_mili = absolute_value(start_sector_g - sections[0]) * seek_time_g + access_time_g;
+    time_mili        = absolute_value(start_sector_g - sections[0]) * seek_time_g + access_time_g;
     
     current_position = sections[0];
-    sum = absolute_value(start_sector_g - sections[0]);
-    // 1 2 3
+    
+    head_movement    = absolute_value(start_sector_g - sections[0]);
     
     for(index = 1; index < *size; ++index) {
-        time_mili = time_mili + absolute_value(current_position - sections[index]) * seek_time_g + access_time_g + (sections[index + 1] > sections[index] ? 0 : rotation_time_g);   
-        sum += absolute_value(current_position - sections[index]);
+
+        time_mili        = time_mili + absolute_value(current_position - sections[index]) * seek_time_g + access_time_g + (sections[index + 1] > sections[index] ? 0 : rotation_time_g);   
+    
+        head_movement   += absolute_value(current_position - sections[index]);
+        
         current_position = sections[index];
         
     }
     
-    printf("%d\n", sum);
+    execution_details.time_mili     = time_mili;
+    execution_details.head_movement = head_movement;
     
-    return(time_mili);
-    
-    
+    return(execution_details);
+
 }
 
+task_details_t
+SSTF(const disk_section *sections, const size_t *size) {
+    
+    
+    double time_mili;
+    
+    int32_t index;
+    
+    int32_t  head_movement;
+
+    uint32_t current_position;
+    
+    uint32_t current;
+    
+    task_details_t execution_details;
+    
+    
+    // 0 1 2 3 4 
+    for(index = 0; index < *size; ++index) {
+            
+    }
+     
+}
 
 double
 ud_stoi(const char *__restrict number) {
@@ -369,6 +460,8 @@ u32_stoi(const char * __restrict number) {
     for(; *number != 0; ++number) {
         
         /* check the first bit since it'd be a negative value if it overflows */
+        /* TODO: bitwise */
+        
         if((((buf * 10) + CHAR_TO_DIGIT(*number)) & 0x80000000) == 0) 
             buf = (buf * 10) + CHAR_TO_DIGIT(*number);
         else
@@ -378,7 +471,8 @@ u32_stoi(const char * __restrict number) {
     return(buf);
 }
 
-void FCFS_thread_start(void *vptr) {
+void 
+FCFS_thread_start(void *vptr) {
     
     
     int32_t *sections;
@@ -388,23 +482,24 @@ void FCFS_thread_start(void *vptr) {
     
     size_t   size;
     
-    
-    double   time_mili;
+    task_details_t execution_details;
     
     for(index = 0, algo_index = 0; index < nlines_g; ++index) {
         
-        sections  = sections_g[index];
-        size      = sizeof(sections)/sizeof(*sections);
-        time_mili = FCFS(sections, &size);
+        sections          = sections_g[index];
+        size              = sizeof(sections)/sizeof(*sections);
+        execution_details = FCFS(sections, &size);
     
-        algo_time_g[algo_index++][FCFS_THREAD] = time_mili; 
+        algo_time_g[algo_index][FCFS_THREAD]        = execution_details.time_mili;
+        head_movement_g[algo_index++][FCFS_THREAD]  = execution_details.head_movement;
         
         
         /* signal that it has finished the line */
         semaphores.signal_A = 0x01;
     
-        /* busy wait until the other threads have finished or there are no more lines */
-        while(IS_READY_NEXT_LINE(latch))
+    
+        /* busy wait until the other threads have finished */
+        while(!IS_READY_NEXT_LINE(latch))
             ;
     }
     
@@ -433,6 +528,95 @@ find_min_time(const double *array) {
     }
     
     return(min);
+}
+
+
+uint32_t
+find_closest_distance(const disk_section *sections, const size_t *size, uint32_t section) {
+    
+    uint32_t index;
+    uint32_t deltaD;
+    uint32_t position;
+    
+    deltaD = (1 << 29);
+    
+    for(index = 0; index < *size; ++index) {
+        
+        if(absolute_value(section - sections[index]) < deltaD && sections[index] != section) {
+        
+            deltaD   = absolute_value(section - sections[index]);
+        
+            position = index; 
+        }
+            
+    }
+    
+    return(position);
+    
+}
+
+
+void *
+mmalloc(size_t size) {
+    
+    void *addr;
+    
+    addr = malloc(size);
+    
+    if(addr == NULL)
+        DIE("Fatal", "Failed to allocate memory", NULL);
+        
+    return(addr);
+}
+
+
+double
+cceil(double value) {
+    
+    /* extract the mantissa from the double and check if it is above > .5 */   
+    
+    return 0.0;
+}
+
+bitset_t *
+make_bitset(size_t size) {
+    
+    
+    uint32_t  nbits;
+    
+    bitset_t *bitset;
+    
+    
+    if(size <= 0)
+        return NULL;
+        
+    
+    nbits = ceil((double) size/sizeof(uint8_t));
+    
+    bitset = mmalloc(sizeof(uint8_t) * nbits);
+    
+    return(bitset);
+    
+}
+     
+/* 0x00 00 00 00 00 xx 00 00 00 00 00 =>
+    55 => 55/8
+
+    floor(log(n)/log(2)) - 1;
+    
+    [00000000][00000000][00000000]
+    
+    => 10 =>
+    
+*/
+void
+bitset_set_bit(bitset_t *set, uint32_t position) {
+    
+    uint32_t nbyte;
+    
+    nbyte = floor((double) position/8);
+    
+    /*set[nbyte] |= (1U << ())*/
 }
 
 
