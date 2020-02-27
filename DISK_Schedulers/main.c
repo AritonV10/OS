@@ -40,40 +40,30 @@
     }while(0);
 
 
-#define SIZE(c) (sizeof(c)/sizeof(*c))
-
-#define NTHREADS    (0x4)
-
-#define FCFS_THREAD (0x01) 
-
-#define SCAN_THREAD (0x02)
-
-#define _THREAD     (0x03)
-
-#define _THREAD2    (0x04)
+#define NTHREADS              (0x4)
+#define FCFS_THREAD           (0x01) 
+#define SCAN_THREAD           (0x02)
+#define _THREAD               (0x03)
+#define _THREAD2              (0x04)
 
 
-#define CHAR_TO_DIGIT(c) ((c) & 0x0F)
-    
-
-#define IS_DONE(c)            (c == DONE)
-#define IS_READY_NEXT_LINE(c) (c == LINE)
+#define CHAR_TO_DIGIT(c)      ((c) & 0x0F)
     
 
 #define CHAR_BIT 8
-
 #define SINT_MAX              (1u << (sizeof(int32_t) * CHAR_BIT - 1))
-
 #define UDOUBLE_EXPONENT_MAX  (1u << (sizeof(double) * CHAR_BIT - 1))
+#define SIZE(c)               (sizeof(c)/sizeof(*c))
+#define U8_SIZE               (sizeof(uint8_t))
+#define U8_SIZE_BITS          (U8_SIZE * CHAR_BIT)
 
 
+#define IS_DONE(c)            (c == DONE)
+#define IS_READY_NEXT_LINE(c) (c == LINE)
 
-#define BOILER_PLATE \
-    double time_mili; \
-    int32_t index; \
-    int32_t  head_movement; \
-    uint32_t current_position; \
-    task_details_t execution_details;
+/* lock the signals */
+#define ENTER_CRITICAL
+#define EXIT_CRITICAL
     
 /******************** TYPE DEFINITIONS **********************************/
 
@@ -82,7 +72,6 @@ typedef int FD;
 typedef void(*algo_func)(void*);
 
 typedef uint32_t disk_section;
-
 
 typedef enum _task_status {
     
@@ -111,7 +100,7 @@ typedef struct _task_details {
 */
 
 
-typedef union _semaphore {
+typedef union _signal {
     
     uint32_t signals;
     
@@ -145,12 +134,14 @@ typedef union _semaphore {
     
     #endif
     
-} semaphore_t;
+} signal_t;
 
 
 typedef struct _bitset {
     
-    uint8_t *array;
+    uint32_t  nbits;
+    
+    uint8_t   *array;
     
 } bitset_t;
 
@@ -163,6 +154,9 @@ mmalloc(size_t);
 
 bitset_t *
 make_bitset(size_t);
+
+int32_t
+bitset_set_bit(bitset_t *, uint32_t);
 
 uint32_t
 find_closest_distance(const disk_section *, const size_t *, uint32_t);
@@ -199,7 +193,7 @@ CSCAN(const disk_section *, const uint32_t *);
 
 
 /* volatile in case it gets cached since it fits into the cache */
-volatile semaphore_t semaphores = {(0x00000000)};
+volatile signal_t thread_signals = {(0x00000000)};
 
 /* wait for all the threads to finish before continuing */
 volatile int32_t latch;
@@ -263,23 +257,26 @@ int main(int argc, char **argv) {
         start_sector_g               = 53;
     
     #endif
-    
+     
+    /* global [][], main waits until all the threads have finished the lines, main computes the best time for each line */
     /* open file -> get # lines -> alloc the disk sections -> SEEK_START the cursor -> get # of integers -> alloc the arrays
        -> start the threads -> check the bitmap -> realloc the array for the new numbers */
     
     /* printf("%f\n", FCFS(test_sections, &size)); */
     
+    /* printf("%d\n", (uint32_t)ceil((double)55/8)); */
+    
     task_details_t ex = FCFS(test_sections, &size);
     
    // printf("%d", test_sections[find_closest_distance(test_sections, &size, 41)]);
     
-    printf("%f\n", ceil(2.125));
-    
-    double x = 2.25;
-    
     /* 1/(bit_position) ) [11 bits exponent][53 mantissa] => */
     
-    printf("%d", ((int64_t) x >> (51)));
+    bitset_t *t = make_bitset(30);
+    
+    bitset_set_bit(t, 26);
+    
+    printf("%d", t->array[3]);
     
     /*double x = 2.5;*/
     
@@ -391,17 +388,15 @@ SSTF(const disk_section *sections, const size_t *size) {
     double time_mili;
     
     int32_t index;
-    
     int32_t  head_movement;
-
-    uint32_t current_position;
     
+    uint32_t current_position;
     uint32_t current;
     
     task_details_t execution_details;
     
     
-    // 0 1 2 3 4 
+    /* 0 -> n, n mod 8, */ 
     for(index = 0; index < *size; ++index) {
             
     }
@@ -413,7 +408,7 @@ ud_stoi(const char *__restrict number) {
     
     double   buf;
     
-    double   mantisa;
+    double   mantissa;
     
     uint32_t ten;
     
@@ -440,7 +435,7 @@ ud_stoi(const char *__restrict number) {
         
         ten *= 0x0000000A;
         
-        buf += mantisa;
+        buf += mantissa;
     }
     
     return(buf);
@@ -495,7 +490,7 @@ FCFS_thread_start(void *vptr) {
         
         
         /* signal that it has finished the line */
-        semaphores.signal_A = 0x01;
+        thread_signals.signal_A = 0x01;
     
     
         /* busy wait until the other threads have finished */
@@ -504,7 +499,7 @@ FCFS_thread_start(void *vptr) {
     }
     
     /* signal that it has finished all the lines */
-    semaphores.signal_A = 0x10;
+    thread_signals.signal_A = 0x10;
 }
 
 
@@ -569,55 +564,59 @@ mmalloc(size_t size) {
     return(addr);
 }
 
-
-double
-cceil(double value) {
-    
-    /* extract the mantissa from the double and check if it is above > .5 */   
-    
-    return 0.0;
-}
-
 bitset_t *
-make_bitset(size_t size) {
+make_bitset(size_t size_bits) {
     
     
-    uint32_t  nbits;
+    uint32_t  nbytes;
     
     bitset_t *bitset;
     
     
-    if(size <= 0)
+    if(size_bits <= 0)
         return NULL;
-        
     
-    nbits = ceil((double) size/sizeof(uint8_t));
+    nbytes        = (uint32_t) ceil((double) size_bits/U8_SIZE_BITS);
     
-    bitset = mmalloc(sizeof(uint8_t) * nbits);
+    bitset        = mmalloc(sizeof(bitset_t));
+    bitset->array = mmalloc(U8_SIZE * nbytes);
+    bitset->nbits = size_bits;
+    
     
     return(bitset);
     
 }
      
-/* 0x00 00 00 00 00 xx 00 00 00 00 00 =>
+/*  8, 16, 24, 32, 40, 48, 56, 
+    0x00 00 00 00 00 xx 00 00 00 00 00 =>
     55 => 55/8
 
     floor(log(n)/log(2)) - 1;
     
-    [00000000][00000000][00000000]
+    [00000000][00000000][00000000][00000000]
     
     => 10 =>
     
 */
-void
-bitset_set_bit(bitset_t *set, uint32_t position) {
+
+uint32_t
+bitset_to_index(const uint32_t position) {
     
-    uint32_t nbyte;
-    
-    nbyte = floor((double) position/8);
-    
-    /*set[nbyte] |= (1U << ())*/
+    return(((uint32_t) floor((double) position/8)) + 1);
+
 }
+
+int32_t
+bitset_set_bit(bitset_t *set, const uint32_t position) {
+    
+    if(set->nbits < position)
+        return -1;
+    
+    set->array[bitset_to_index(position) - 1] |= (1U << ((position - 1) % 8));
+    
+    return 1;
+}
+
 
 
 
