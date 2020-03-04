@@ -4,6 +4,7 @@
 #include <math.h>
 
 
+
 #define _LITTLE_INDIAN_
 
 /* used for testing individual functions */
@@ -31,13 +32,17 @@
 
 
 #define LOG(type, fmt, ...) do { \
-        printf("[" type "]: " fmt, __VA_ARGS__); \
+        printf("[" type "]: " fmt "\n", __VA_ARGS__); \
     }while(0);
     
 #define DIE(type, fmt, ...) do { \
         LOG(type, fmt, __VA_ARGS__) \
         exit(1); \
     }while(0);
+
+
+#define ALGO_TIME(a, b) absolute_value((a) - (b)) * seek_time_g + access_time_g
+#define IS_DIRECTION_CHANGE(a, b) ((a) < (b) ? 0 : rotation_time_g)
 
 
 #define NTHREADS              (0x4)
@@ -49,11 +54,11 @@
 
 #define CHAR_TO_DIGIT(c)      ((c) & 0x0F)
     
-
-#define CHAR_BIT 8
+#define SIZE(c)               (sizeof(c)/sizeof(*c))
+#define CHAR_BIT              (8)
 #define SINT_MAX              (1u << (sizeof(int32_t) * CHAR_BIT - 1))
 #define UDOUBLE_EXPONENT_MAX  (1u << (sizeof(double) * CHAR_BIT - 1))
-#define SIZE(c)               (sizeof(c)/sizeof(*c))
+
 #define U8_SIZE               (sizeof(uint8_t))
 #define U8_SIZE_BITS          (U8_SIZE * CHAR_BIT)
 
@@ -72,6 +77,15 @@ typedef int FD;
 typedef void(*algo_func)(void*);
 
 typedef uint32_t disk_section;
+
+
+typedef enum _direction {
+    
+    LEFT  = 0,
+    
+    RIGHT = 1,
+    
+} direction_e;
 
 typedef enum _task_status {
     
@@ -139,8 +153,10 @@ typedef union _signal {
 
 typedef struct _bitset {
     
-    uint32_t  nbits;
+    uint8_t   resizeable;
     
+    uint32_t  nbits;
+
     uint8_t   *array;
     
 } bitset_t;
@@ -149,17 +165,45 @@ typedef struct _bitset {
 /******************** FUNCTION DECLARATIONS *****************************/
 
 
+/***** BITSET *****/
+
 void *
 mmalloc(size_t);
 
 bitset_t *
-make_bitset(size_t);
+make_bitset(size_t, uint8_t);
 
 int32_t
-bitset_set_bit(bitset_t *, uint32_t);
+bitset_set_bit(bitset_t *, const uint32_t);
 
 uint32_t
-find_closest_distance(const disk_section *, const size_t *, uint32_t);
+bitset_to_index(const uint32_t);
+
+int8_t
+bitset_get_bit(const bitset_t *, const uint32_t);
+
+void
+bitset_clear(bitset_t *);
+
+/****************************/
+
+
+void
+SCAN_right(const disk_section *, const size_t *, double *, int32_t *, uint32_t, uint32_t *);
+    
+
+void
+SCAN_left(const disk_section *, const size_t *, double *, int32_t *, uint32_t, uint32_t *);
+    
+
+int32_t 
+comparator(const void *, const void *); 
+
+uint32_t
+find_position(const disk_section *, const size_t *, const disk_section);
+    
+int32_t
+find_closest_distance(const disk_section *, const size_t *, uint32_t, const bitset_t *);
 
 uint32_t
 find_min_time(const double *);
@@ -182,11 +226,13 @@ FCFS(const disk_section *, const size_t *);
 task_details_t
 SSTF(const disk_section *, const size_t *);
 
-double
+task_details_t
 SCAN(const disk_section *, const size_t *);
 
 double
 CSCAN(const disk_section *, const uint32_t *);
+
+
 
 /************************************************************************/
 /************************************************************************/
@@ -245,8 +291,11 @@ int main(int argc, char **argv) {
     
     #if defined(__DEBUG__)
         
-        disk_section test_sections[] = {98, 183, 41, 122, 14, 124, 65, 67};
-        size_t size                  = sizeof(test_sections)/sizeof(*test_sections);         
+        disk_section test_sections[] = {9, 20, 25, 33, 56, 77, 120, 155, 200};
+        size_t size                  = SIZE(test_sections);         
+        
+        /* element: 12 -> 
+        14, 41, 65, 67, 98, 122, 124, 183 */
         
         rotation_time_g              = (double) .1;
         
@@ -254,42 +303,28 @@ int main(int argc, char **argv) {
     
         seek_time_g                  = (double) .1;
     
-        start_sector_g               = 53;
+        start_sector_g               = 125;
     
     #endif
-     
-    /* global [][], main waits until all the threads have finished the lines, main computes the best time for each line */
-    /* open file -> get # lines -> alloc the disk sections -> SEEK_START the cursor -> get # of integers -> alloc the arrays
-       -> start the threads -> check the bitmap -> realloc the array for the new numbers */
-    
-    /* printf("%f\n", FCFS(test_sections, &size)); */
-    
-    /* printf("%d\n", (uint32_t)ceil((double)55/8)); */
-    
+
     task_details_t ex = FCFS(test_sections, &size);
     
-   // printf("%d", test_sections[find_closest_distance(test_sections, &size, 41)]);
+    bitset_t *t = make_bitset(200, 1);
     
-    /* 1/(bit_position) ) [11 bits exponent][53 mantissa] => */
+    printf("%d\n", SCAN(test_sections, &size).head_movement);
     
-    bitset_t *t = make_bitset(30);
-    
-    bitset_set_bit(t, 26);
-    
-    printf("%d", t->array[3]);
-    
-    /*double x = 2.5;*/
-    
-    /*printf("%d", (((int64_t) x) & 0x000FFFFFFFFF)); */
-    
-    /* busy wait until all the threads are done */
     /*
+    for(int i = 0; i < (uint32_t) ceil((double) t->nbits/U8_SIZE_BITS); ++i) {
+        for(int j = 0; j < 8; ++j) {
+            printf("%d ", (t->array[i] & (1u << j)) == 0 ? 0 : 1);
+        }
+        
+        printf("%c", '|');
+    }
+    
     while(!IS_DONE(latch))
         ;
-    
-    */
-    /* find the smallest time for each algorithm */
-    /*
+        
     for(index = 0; index < nlines_g; ++index) {
         
         double *times = algo_time_g[index];
@@ -305,11 +340,6 @@ int main(int argc, char **argv) {
 }
 
 /******************** FUNCTION DEFINITIONS ******************************/
-
-/* 1100 -> 0100 -. 0011 -> 0111, -8, var & (1ul << sizeof(int32_t) * CHAR_BIT - 1), ~!sign * var */
-
-
-
 
 
 /* branchless abs */
@@ -328,20 +358,150 @@ die(const char *type, const char *fmt, const char *arg, ...) {
 }
 
 
-/* scans either the left or right sections first */
-double
+int32_t 
+comparator(const void *p, const void *q) { 
+    
+    disk_section section_a = *((disk_section*)p); 
+    
+    disk_section section_b = *((disk_section*)q);  
+    
+    return(section_a >= section_b); 
+} 
+
+
+
+uint32_t
+find_position(const disk_section *sections, const size_t *size, const disk_section section) {
+    
+    
+    uint32_t index;
+
+    for(index = 0; index < *size; ++index)
+        if(sections[index] >= section)
+            return(index - 1);
+    
+    return(*size - 1);
+}
+
+
+void
+SCAN_left(const disk_section *sections, const size_t *size, double *time_mili, int32_t *head_movement, 
+uint32_t position, uint32_t *current_sector) {
+    
+    
+    int32_t index;
+    
+    for(index = position; index >= 0; --index) {
+                    
+        *time_mili       = *time_mili + ALGO_TIME(*current_sector, sections[index]) + IS_DIRECTION_CHANGE(*current_sector, sections[index]);   
+                    
+        *head_movement   += absolute_value(*current_sector - sections[index]);
+                    
+        printf("%d - %d\n", *current_sector, sections[index]);
+                    
+        *current_sector = sections[index];
+    
+    }
+    
+}
+
+
+void
+SCAN_right(const disk_section *sections, const size_t *size, double *time_mili, int32_t *head_movement, 
+uint32_t position, uint32_t *current_sector) {
+    
+    uint32_t index;
+    
+    for(index = (position == -1 ? 0 : position + 1); index < *size; ++index) {
+                    
+        *time_mili       = *time_mili + ALGO_TIME(*current_sector, sections[index]) + IS_DIRECTION_CHANGE(*current_sector, sections[index]);   
+                    
+        *head_movement   += absolute_value(*current_sector - sections[index]);
+                    
+        printf("%d - %d\n", *current_sector, sections[index]);
+                    
+        *current_sector = sections[index];
+                    
+    }
+                
+}
+
+
+task_details_t
 SCAN(const disk_section *sections, const size_t *size) {
+    
     
     double time_mili;
     
     int32_t index;
-    uint32_t current_position;
+    
+    int32_t  head_movement;
 
-    /* TODO: check for underflow */
+    uint32_t current_sector;
     
-    time_mili = absolute_value(start_sector_g - sections[0]) * seek_time_g + access_time_g;
+    uint32_t position;
     
+    direction_e direction;
+    
+    task_details_t execution_details;
+    
+    
+    disk_section *sections_copy;
+    
+    sections_copy = mmalloc((*size) * sizeof(disk_section));
+    head_movement = 0;
+    time_mili     = 0.0;
+    
+    
+    /* make a copy since the array is global */
+    for(index = 0; index < *size; ++index)
+        sections_copy[index] = sections[index];
+        
+    /* sort the array so we can find the position of the start sector */
+    qsort(sections_copy, *size, sizeof(disk_section), comparator);
+    
+    position = find_position(sections_copy, size, start_sector_g);
+    
+    if(position < (*size - position))
+        direction = LEFT;
+    else
+        direction = RIGHT;
+    
+    
+    if(direction)
+        printf("%s\n", "Going RIGHT");
+    else
+        printf("%s\n", "Going LEFT");
+        
+    current_sector = start_sector_g;
+    
+    switch(direction) {
+        
+        case LEFT:
+        
+            SCAN_left(sections_copy, size, &time_mili, &head_movement, position, &current_sector);
+        
+            SCAN_right(sections_copy, size, &time_mili, &head_movement, position, &current_sector);
+        
+        break;
+            
+        case RIGHT:
+        
+            SCAN_right(sections_copy, size, &time_mili, &head_movement, position, &current_sector);
+        
+            SCAN_left(sections_copy, size, &time_mili, &head_movement, position, &current_sector);
+        
+        break;
+    }
+    
+    execution_details.time_mili     = time_mili;
+    execution_details.head_movement = head_movement;
+    
+    
+    return(execution_details);
 }
+
+
 
 task_details_t
 FCFS(const disk_section *sections, const size_t *size) {
@@ -352,25 +512,21 @@ FCFS(const disk_section *sections, const size_t *size) {
     
     int32_t  head_movement;
 
-    uint32_t current_position;
+    uint32_t current_sector;
     
     task_details_t execution_details;
     
     /* TODO: check for underflow */
     
-    time_mili        = absolute_value(start_sector_g - sections[0]) * seek_time_g + access_time_g;
+    current_sector = start_sector_g;
+    head_movement  = 0;
     
-    current_position = sections[0];
-    
-    head_movement    = absolute_value(start_sector_g - sections[0]);
-    
-    for(index = 1; index < *size; ++index) {
+    for(index = 0; index < *size + 1; ++index) {
 
-        time_mili        = time_mili + absolute_value(current_position - sections[index]) * seek_time_g + access_time_g + (sections[index + 1] > sections[index] ? 0 : rotation_time_g);   
-    
-        head_movement   += absolute_value(current_position - sections[index]);
+        time_mili        = time_mili + ALGO_TIME(current_sector, sections[index]) + IS_DIRECTION_CHANGE(current_sector, sections[index]);   
+        head_movement   += absolute_value(current_sector - sections[index]);
         
-        current_position = sections[index];
+        current_sector = sections[index];
         
     }
     
@@ -381,27 +537,6 @@ FCFS(const disk_section *sections, const size_t *size) {
 
 }
 
-task_details_t
-SSTF(const disk_section *sections, const size_t *size) {
-    
-    
-    double time_mili;
-    
-    int32_t index;
-    int32_t  head_movement;
-    
-    uint32_t current_position;
-    uint32_t current;
-    
-    task_details_t execution_details;
-    
-    
-    /* 0 -> n, n mod 8, */ 
-    for(index = 0; index < *size; ++index) {
-            
-    }
-     
-}
 
 double
 ud_stoi(const char *__restrict number) {
@@ -429,9 +564,9 @@ ud_stoi(const char *__restrict number) {
     
     /* 43.132 */
     /* inefficient way */
-    for(; *number != NULL; ++number) {
+    for(; number != NULL; ++number) {
         
-        mantisa = (float)(CHAR_TO_DIGIT(*number))/ten;
+        mantissa = (float)(CHAR_TO_DIGIT(*number))/ten;
         
         ten *= 0x0000000A;
         
@@ -526,27 +661,42 @@ find_min_time(const double *array) {
 }
 
 
-uint32_t
-find_closest_distance(const disk_section *sections, const size_t *size, uint32_t section) {
+int32_t
+find_closest_distance(const disk_section *sections, const size_t *size, uint32_t section, const bitset_t *table) {
     
     uint32_t index;
     uint32_t deltaD;
     uint32_t position;
+    uint32_t abs_distance;
     
-    deltaD = (1 << 29);
+    
+    deltaD = (1 << 31);
     
     for(index = 0; index < *size; ++index) {
         
-        if(absolute_value(section - sections[index]) < deltaD && sections[index] != section) {
+        abs_distance = absolute_value(section - sections[index]);
         
+        
+        if(abs_distance <= deltaD 
+        && 
+        sections[index] != section
+        && 
+        bitset_get_bit(table, sections[index]) != 1) {
+        
+            
             deltaD   = absolute_value(section - sections[index]);
-        
             position = index; 
         }
             
     }
     
-    return(position);
+    
+    if(deltaD != (1 << 31)) {
+        bitset_set_bit((bitset_t *)table, sections[position]);
+        return(position);
+    }
+    
+    return(-1);
     
 }
 
@@ -565,58 +715,127 @@ mmalloc(size_t size) {
 }
 
 bitset_t *
-make_bitset(size_t size_bits) {
+make_bitset(size_t size_bits, uint8_t resizeable) {
     
     
+    uint32_t  i;
     uint32_t  nbytes;
     
     bitset_t *bitset;
-    
     
     if(size_bits <= 0)
         return NULL;
     
     nbytes        = (uint32_t) ceil((double) size_bits/U8_SIZE_BITS);
     
-    bitset        = mmalloc(sizeof(bitset_t));
-    bitset->array = mmalloc(U8_SIZE * nbytes);
-    bitset->nbits = size_bits;
+    bitset             = mmalloc(sizeof(bitset_t));
+    bitset->array      = mmalloc(U8_SIZE * nbytes);
+    bitset->nbits      = size_bits;
+    bitset->resizeable = resizeable;
     
+    for(i = 0; i < nbytes; ++i)
+        bitset->array[i] = 0;
+    
+    
+    LOG("Bitset_LOG", "Allocated %d bytes", nbytes);
     
     return(bitset);
     
 }
      
-/*  8, 16, 24, 32, 40, 48, 56, 
-    0x00 00 00 00 00 xx 00 00 00 00 00 =>
-    55 => 55/8
-
-    floor(log(n)/log(2)) - 1;
-    
-    [00000000][00000000][00000000][00000000]
-    
-    => 10 =>
-    
-*/
-
 uint32_t
 bitset_to_index(const uint32_t position) {
-    
-    return(((uint32_t) floor((double) position/8)) + 1);
-
+    return((uint32_t)((double)(position - 1)/U8_SIZE_BITS));
 }
 
 int32_t
 bitset_set_bit(bitset_t *set, const uint32_t position) {
     
+    
+    uint32_t nbyte;
+    
+    if(set->nbits < position) {
+        switch(set->resizeable) {
+            case 1:
+            
+                 set->array = realloc(set->array, (uint32_t) ceil((double) position/U8_SIZE_BITS) + 1);
+                 set->nbits = position;
+                
+            break;
+            
+            return(-1);
+        }
+    }
+        
+    
+    nbyte = bitset_to_index(position); 
+        
+    set->array[nbyte] |= (1u << ((position - 1) % U8_SIZE_BITS));
+    
+    LOG("Bitset_LOG", "Setting bit %d", position);
+    
+    return(1);
+}
+
+int8_t
+bitset_get_bit(const bitset_t *set, uint32_t position) {
+    
+    uint32_t nbyte;
+    
     if(set->nbits < position)
         return -1;
     
-    set->array[bitset_to_index(position) - 1] |= (1U << ((position - 1) % 8));
+    nbyte = bitset_to_index(position);
     
-    return 1;
+    return( ((set->array[nbyte] & (1u << (((position - 1) % U8_SIZE_BITS)))) == 0 ? 0 : 1) );
 }
 
+
+
+task_details_t
+SSTF(const disk_section *sections, const size_t *size) {
+    
+    
+    double time_mili;
+    
+    int32_t  index;
+    int32_t  head_movement;
+    uint32_t min_position;
+    
+    uint32_t current_sector;
+    
+    task_details_t execution_details;
+    
+    bitset_t *table;
+    
+    table          = make_bitset(500, 1);
+    
+    current_sector = start_sector_g;
+    
+    head_movement  = 0;
+    
+    for(index = 0; index < *size + 1; ++index) {
+               
+        min_position  = find_closest_distance(sections, size, current_sector, table);
+        
+        /* check to see if it is the last element */
+        if(min_position == -1)
+          break;  
+        
+        time_mili     = time_mili + ALGO_TIME(current_sector, sections[min_position]) + IS_DIRECTION_CHANGE(current_sector, sections[min_position]);
+        head_movement += absolute_value(current_sector - sections[min_position]);
+        
+        printf("%d - %d\n", current_sector, sections[min_position]);
+        
+        current_sector = sections[min_position];
+    }
+    
+    execution_details.head_movement = head_movement;
+    execution_details.time_mili     = time_mili;
+    
+    return(execution_details);
+     
+}
 
 
 
